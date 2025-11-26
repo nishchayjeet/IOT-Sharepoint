@@ -138,24 +138,46 @@ $(uuidgen),${SERVER_NAME},${SERVER_URL},Production,$(date -Iseconds),Active,Auto
 EOF
 log_message "Created ChirpStack servers registry"
 
-# 2. Tenants
+# 2. Tenants (with device/gateway counts)
 export_table "tenants" "
 SELECT
-    id::text as tenant_id,
-    name as tenant_name,
-    description,
-    max_device_count,
-    max_gateway_count,
-    can_have_gateways,
-    private_gateways_up,
-    private_gateways_down,
-    created_at,
-    updated_at,
+    t.id::text as tenant_id,
+    t.name as tenant_name,
+    t.description,
+    t.max_device_count,
+    t.max_gateway_count,
+    t.can_have_gateways,
+    t.private_gateways_up,
+    t.private_gateways_down,
+    t.created_at,
+    t.updated_at,
+    COALESCE(device_counts.total_devices, 0) as total_devices,
+    COALESCE(device_counts.active_devices, 0) as active_devices,
+    COALESCE(gateway_counts.total_gateways, 0) as total_gateways,
+    COALESCE(gateway_counts.online_gateways, 0) as online_gateways,
     '${SERVER_NAME}' as source_server,
     '${TIMESTAMP}' as export_timestamp
-FROM tenant
-ORDER BY name
+FROM tenant t
+LEFT JOIN (
+    SELECT 
+        a.tenant_id,
+        COUNT(d.dev_eui) as total_devices,
+        COUNT(CASE WHEN d.is_disabled = false THEN 1 END) as active_devices
+    FROM device d
+    INNER JOIN application a ON d.application_id = a.id
+    GROUP BY a.tenant_id
+) device_counts ON device_counts.tenant_id = t.id
+LEFT JOIN (
+    SELECT 
+        tenant_id,
+        COUNT(gateway_id) as total_gateways,
+        COUNT(CASE WHEN last_seen_at > NOW() - INTERVAL '5 minutes' THEN 1 END) as online_gateways
+    FROM gateway
+    GROUP BY tenant_id
+) gateway_counts ON gateway_counts.tenant_id = t.id
+ORDER BY t.name
 "
+
 
 # 3. Applications
 export_table "applications" "
